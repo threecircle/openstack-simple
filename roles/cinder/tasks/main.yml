@@ -1,0 +1,133 @@
+#Сранное говно, на которое я потратил 7 часов, потому что он не умеет хранить данные локально в папке
+---
+- name: Prepare Database
+  block:
+    - name: Create Role
+      command: psql -U postgres -c "CREATE ROLE cinder_user LOGIN PASSWORD '1234567yY!'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database
+      command: psql -U postgres -c "CREATE DATABASE "cinder_db" with owner 'cinder_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+- name: Register Cinder
+  ignore_errors: true
+  block:
+    - name: Create User
+      command: openstack user create --domain default cinder --password cinder
+
+    - name: Add role for user
+      command: openstack role add --project admin --user cinder admin
+
+    - name: Create service
+      command: openstack service create --name cinderv3 --description "OpenStack Block Storage" volumev3
+
+    - name: Register public Endpoint
+      command: openstack endpoint create --region RegionOne volumev3 public http://localhost:8776/v3/%\(project_id\)s
+
+    - name: Register internal Endpoint
+      command: openstack endpoint create --region RegionOne volumev3 internal http://localhost:8776/v3/%\(project_id\)s
+
+    - name: Register admin Endpoint
+      command: openstack endpoint create --region RegionOne volumev3 admin http://localhost:8776/v3/%\(project_id\)s
+
+- name: Install Cinder
+  apt:
+    name: 
+      - cinder-api
+      - cinder-scheduler
+      - cinder-volume
+      - tgt
+      - lvm2
+    update_cache: true
+
+- name: Copy Cinder config
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/cinder.conf"
+    dest: /etc/cinder/cinder.conf
+    mode: '0640'
+
+- name: Create Storage driver
+  ignore_errors: true
+  block:
+    - name: Create folder 
+      command: mkdir -m 755 /var/cinder
+      
+    - name: Create image
+      command: dd if=/dev/zero of=/var/cinder/disk1.img bs=1M count=20000
+
+    - name: Mount create disk 
+      command: losetup /dev/loop20 /var/cinder/disk1.img
+
+    - name: Create pv
+      command: pvcreate /dev/loop20
+
+    - name: Create vg 
+      command: vgcreate cinder-volumes /dev/loop20
+
+- name: Copy service for autoload loop device
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/loops-setup.service"
+    dest: /etc/systemd/system/loops-setup.service
+    mode: '0644'
+
+- name: Enable auto run loop
+  ansible.builtin.systemd:
+    name: loops-setup
+    enabled: true
+
+- name: Copy confd
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/confd.conf"
+    dest: /etc/tgt/conf.d/cinder.conf
+    mode: '0644'
+
+- name: Sync database
+  command: cinder-manage db sync
+
+- name: Restart Nova
+  ansible.builtin.systemd:
+    name: nova-api
+    enabled: true
+    state: restarted
+
+- name: Restart cinder-scheduler
+  ansible.builtin.systemd:
+    name: cinder-scheduler
+    enabled: true
+    state: restarted
+
+- name: Restart apache2
+  ansible.builtin.systemd:
+    name: apache2
+    enabled: true
+    state: restarted
+
+- name: Restart cinder-volume
+  ansible.builtin.systemd:
+    name: cinder-volume
+    enabled: true
+    state: restarted
+
+- name: Restart tgt
+  ansible.builtin.systemd:
+    name: tgt
+    enabled: true
+    state: restarted
+
+- name: Healtcheck
+  block:
+    - name: Get vs
+      command: openstack volume service list
+      register: vs
+
+    - name: Print vs
+      debug: 
+        var: vs.stdout_lines
+

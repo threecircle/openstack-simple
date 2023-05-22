@@ -1,0 +1,71 @@
+---
+- name: Prepare Database
+  block:
+    - name: Create Role
+      command: psql -U postgres -c "CREATE ROLE keystone_user LOGIN PASSWORD '1234567yY!'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database
+      command: psql -U postgres -c "CREATE DATABASE "keystone_db" with owner 'keystone_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+- name: Install Keystone
+  block: 
+    - name: Install Keystone
+      ansible.builtin.apt:
+        name: keystone
+        update_cache: true
+
+    - name: Copy Keystone config
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/keystone.conf"
+        dest: /etc/keystone/keystone.conf
+        mode: '0640'
+
+    - name: Sync database
+      command: keystone-manage db_sync
+
+    - name: Fernet setup
+      command: keystone-manage fernet_setup --keystone-user keystone --keystone-group keystone
+
+    - name: Credential setup
+      command: keystone-manage credential_setup --keystone-user keystone --keystone-group keystone
+
+    - name: Bootstrap
+      command: |
+        keystone-manage bootstrap --bootstrap-password admin \
+        --bootstrap-admin-url http://localhost:5000/v3/ \
+        --bootstrap-internal-url http://localhost:5000/v3/ \
+        --bootstrap-public-url http://localhost:5000/v3/ \
+        --bootstrap-region-id RegionOne
+
+    - name: Copy apache2 config
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/apache2.conf"
+        dest: /etc/apache2/apache2.conf
+        mode: '0644'
+
+    - name: Restart Apache2
+      ansible.builtin.systemd:
+        name: apache2
+        enabled: true
+        state: restarted
+
+
+- name: Healtcheck
+  block:
+    - name: Get projects
+      command: openstack project list
+      register: projects
+      
+    - name: Print projects
+      debug: 
+        var: projects.stdout_lines
+    
+        

@@ -1,0 +1,7 @@
+- hosts: single-node
+  become: true
+  vars_files:
+    - env/auth.yml
+  environment: "{{ ost_auth }}"
+  roles:
+    - horizon

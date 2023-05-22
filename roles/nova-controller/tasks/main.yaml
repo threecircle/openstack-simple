@@ -1,0 +1,122 @@
+---
+- name: Prepare Database
+  block:
+    - name: Create Role
+      command: psql -U postgres -c "CREATE ROLE nova_user LOGIN PASSWORD '1234567yY!'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database nova_api
+      command: psql -U postgres -c "CREATE DATABASE "nova_api_db" with owner 'nova_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database nova_api
+      command: psql -U postgres -c "CREATE DATABASE "nova_db" with owner 'nova_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database nova_cell0
+      command: psql -U postgres -c "CREATE DATABASE "nova_db_cell0" with owner 'nova_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+- name: Register Nova
+  ignore_errors: true
+  block:
+    - name: Create User
+      command: openstack user create --domain default nova --password nova
+
+    - name: Add role for user
+      command: openstack role add --project admin --user nova admin
+
+    - name: Create service
+      command: openstack service create --name nova --description "OpenStack Compute" compute
+
+    - name: Register public Endpoint
+      command: openstack endpoint create --region RegionOne compute public http://localhost:8774/v2.1
+
+    - name: Register internal Endpoint
+      command: openstack endpoint create --region RegionOne compute internal http://localhost:8774/v2.1
+
+    - name: Register admin Endpoint
+      command: openstack endpoint create --region RegionOne compute admin http://localhost:8774/v2.1
+
+- name: Install Nova
+  apt:
+    name: 
+      - nova-api
+      - nova-conductor
+      - nova-novncproxy
+      - nova-scheduler
+    update_cache: true
+
+- name: Copy Nova config
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/nova.conf"
+    dest: /etc/nova/nova.conf
+    mode: '0640'
+
+- name: Sync database api
+  command: nova-manage api_db sync
+
+- name: Create cell0
+  command: nova-manage cell_v2 map_cell0
+  ignore_errors: true
+
+- name: Create cell1
+  command: nova-manage cell_v2 create_cell --name=cell1 --verbose
+  ignore_errors: true
+
+- name: Sync database api
+  command: nova-manage db sync
+
+- name: Restart Nova
+  ansible.builtin.systemd:
+    name: nova-api
+    enabled: true
+    state: restarted
+
+- name: Restart Nova
+  ansible.builtin.systemd:
+    name: nova-scheduler
+    enabled: true
+    state: restarted
+
+- name: Restart Nova
+  ansible.builtin.systemd:
+    name: nova-conductor
+    enabled: true
+    state: restarted
+
+- name: Restart Nova
+  ansible.builtin.systemd:
+    name: nova-novncproxy
+    enabled: true
+    state: restarted
+
+- name: Create example flavor
+  block:
+    - name: Create flavor
+      command: openstack flavor create --id 1 --ram 1024 --vcpus 1 m1.small
+
+    - name: Create flavor uefi
+      command: openstack flavor create --id 2 --ram 1024 --vcpus 1 --property capabilities:boot_mode='uefi' m1.small-uefi
+
+- name: Verify
+  block:
+    - name: Get cells
+      command: nova-manage cell_v2 list_cells
+      register: cells
+
+    - name: Print cells
+      debug: 
+        var: cells.stdout_lines

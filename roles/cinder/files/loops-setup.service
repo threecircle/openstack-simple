@@ -1,0 +1,17 @@
+[Unit]
+Description=Setup loopback devices
+DefaultDependencies=no
+Wants=systemd-udev-settle.service
+Before=lvm2-monitor.service
+After=systemd-udev-settle.service
+
+
+[Service]
+ExecStart=/bin/bash -x -c "/sbin/losetup /dev/loop20 /var/cinder/disk1.img"
+ExecStop=/bin/bash -x -c "/sbin/losetup -d /dev/loop20"
+
+RemainAfterExit=yes
+Type=oneshot
+
+[Install]
+WantedBy=local-fs-pre.target

@@ -1,0 +1,23 @@
+- name: Install nova-compute
+  apt:
+    name: nova-compute
+    update_cache: true
+
+- name: Restart nova-compute
+  ansible.builtin.systemd:
+    name: nova-compute
+    enabled: true
+    state: restarted
+
+- name: Discovery cells
+  command: nova-manage cell_v2 discover_hosts --verbose
+
+- name: Healtcheck
+  block:
+    - name: Get cells
+      command: openstack compute service list
+      register: cells
+
+    - name: Print cells
+      debug: 
+        var: cells.stdout_lines

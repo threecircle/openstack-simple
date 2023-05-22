@@ -1,0 +1,76 @@
+---
+- name: Prepare Database
+  block:
+    - name: Create Role
+      command: psql -U postgres -c "CREATE ROLE placement_user LOGIN PASSWORD '1234567yY!'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database
+      command: psql -U postgres -c "CREATE DATABASE "placement_db" with owner 'placement_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+- name: Register Placement
+  ignore_errors: true
+  block:
+    - name: Create User
+      command: openstack user create --domain default placement --password placement
+
+    - name: Add role for user
+      command: openstack role add --project admin --user placement admin
+
+    - name: Create service
+      command: openstack service create --name placement --description "Placement API" placement
+
+    - name: Register public Endpoint
+      command: openstack endpoint create --region RegionOne placement public http://localhost:8778
+
+    - name: Register internal Endpoint
+      command: openstack endpoint create --region RegionOne placement internal http://localhost:8778
+
+    - name: Register admin Endpoint
+      command: openstack endpoint create --region RegionOne placement admin http://localhost:8778
+
+- name: Install Placement
+  apt:
+    name: placement-api
+    update_cache: true
+
+- name: Copy Placement config
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/placement.conf"
+    dest: /etc/placement/placement.conf
+    mode: '0640'
+
+- name: Sync database
+  command: placement-manage db sync
+
+- name: Restart Apache2
+  ansible.builtin.systemd:
+    name: apache2
+    enabled: true
+    state: restarted
+
+- name: Install ctl 
+  block:
+    - name: Install py
+      apt: 
+        name: python3-pip
+    
+    - name: Install osc 
+      command: pip3 install osc-placement
+
+- name: Healtcheck
+  block:
+    - name: Get resource
+      command: openstack --os-placement-api-version 1.2 resource class list --sort-column name
+      register: resources
+
+    - name: Print resource
+      debug: 
+        var: resources.stdout_lines

@@ -1,0 +1,8 @@
+ost_auth:
+  OS_USERNAME: admin
+  OS_PASSWORD: admin
+  OS_PROJECT_NAME: admin
+  OS_USER_DOMAIN_NAME: Default
+  OS_PROJECT_DOMAIN_NAME: Default
+  OS_AUTH_URL: http://localhost:5000/v3
+  OS_IDENTITY_API_VERSION: 3

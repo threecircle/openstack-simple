@@ -1,0 +1,88 @@
+---
+- name: Add reposytory
+  when: false
+  command: add-apt-repository -y cloud-archive:zed
+
+- name: KVM
+  apt:
+    name: 
+      - qemu-kvm
+      - libvirt-daemon-system
+      - libvirt-clients
+      - bridge-utils
+    update_cache: true
+
+- name: Install PostgreSQL
+  apt:
+    name: postgresql
+
+- name: Install Psycopg2
+  apt:
+    name: python3-psycopg2
+
+- name: Install CLI
+  apt:
+    name: 
+      - python3-openstackclient
+      - nvme-cli
+
+- name: Prepare RabbitMQ
+  block:
+    - name: Install RabbitMQ
+      ansible.builtin.apt:
+        name: rabbitmq-server
+    
+    - name: Add MQ User
+      command: rabbitmqctl add_user openstack RABBIT_PASS
+      failed_when: false
+
+    - name: Set permission for MQ User
+      command: rabbitmqctl set_permissions openstack ".*" ".*" ".*"
+
+  rescue:
+    - meta: clear_host_errors
+    - name: catch
+      debug:
+        msg: "MQ user already exist"
+
+
+- name: Prepare Memcached
+  block:
+    - name: Install Memcached
+      apt:
+        name: 
+          - memcached
+          - python3-memcache
+
+- name: Prepare Etcd
+  block:
+    - name: Install Etcd
+      apt:
+        name: etcd
+
+    - name: Copy Etcd config
+      copy:
+        src: "{{ role_path }}/files/etcd.conf"
+        dest: /etc/default/etcd
+        mode: '0644'
+
+    - name: Restart ETCD
+      systemd:
+        name: etcd
+        enabled: true
+        state: restarted
+
+- name: Prepare PostgreSQL
+  block:
+  - name: Copy postgresql config
+    copy:
+      src: "{{ role_path }}/files/postgresql.conf"
+      dest: /etc/postgresql/14/main/postgresql.conf
+      mode: '0644'
+
+  - name: Restart postgresql
+    systemd:
+      name: postgresql
+      enabled: true
+      state: restarted
+

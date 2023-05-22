@@ -1,0 +1,88 @@
+---
+- name: Prepare Database
+  block:
+    - name: Create Role
+      command: psql -U postgres -c "CREATE ROLE glance_user LOGIN PASSWORD '1234567yY!'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database
+      command: psql -U postgres -c "CREATE DATABASE "glance_db" with owner 'glance_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+- name: Register Glance
+  ignore_errors: true
+  block:
+    - name: Create User
+      command: openstack user create --domain default glance --password glance
+
+    - name: Add role for user
+      command: openstack role add --project admin --user glance admin
+
+    - name: Create service
+      command: openstack service create --name glance --description "OpenStack Image" image
+
+    - name: Register public Endpoint
+      command: openstack endpoint create --region RegionOne image public http://localhost:9292
+
+    - name: Register internal Endpoint
+      command: openstack endpoint create --region RegionOne image internal http://localhost:9292
+
+    - name: Register admin Endpoint
+      command: openstack endpoint create --region RegionOne image admin http://localhost:9292
+  
+
+- name: Install Glance
+  apt:
+    name: glance
+    update_cache: true
+
+- name: Copy Glance config
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/glance-api.conf"
+    dest: /etc/glance/glance-api.conf
+    mode: '0640'
+
+- name: Sync database
+  command: glance-manage db_sync
+
+- name: Restart Glance
+  ansible.builtin.systemd:
+    name: glance-api
+    enabled: true
+    state: restarted
+
+- name: Add first image
+  block:
+    - name: Download cirros image
+      command: wget http://download.cirros-cloud.net/0.4.0/cirros-0.4.0-x86_64-disk.img
+
+    - name: Add cirros in glance
+      command: |
+        glance image-create --name "cirros" \
+        --file cirros-0.4.0-x86_64-disk.img \
+        --disk-format qcow2 --container-format bare \
+        --visibility=public
+
+    - name: Add cirros_uefi in glance
+      command: |
+        glance image-create --name "cirros_uefi" \
+        --file cirros-0.4.0-x86_64-disk.img \
+        --disk-format qcow2 --container-format bare \
+        --visibility=public
+        --property hw_firmware_type=uefi
+
+- name: Healtcheck
+  block:
+    - name: Get images
+      command: glance image-list
+      register: images
+
+    - name: Print images
+      debug: 
+        var: images.stdout_lines

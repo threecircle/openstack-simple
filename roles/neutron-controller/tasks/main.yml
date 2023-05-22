@@ -1,0 +1,179 @@
+---
+- name: Prepare Database
+  block:
+    - name: Create Role
+      command: psql -U postgres -c "CREATE ROLE neutron_user LOGIN PASSWORD '1234567yY!'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+    - name: Create Database
+      command: psql -U postgres -c "CREATE DATABASE "neutron_db" with owner 'neutron_user' encoding 'utf8'"
+      vars:
+        ansible_ssh_pipelining: true
+      become_user: postgres
+      ignore_errors: True
+
+- name: Register Neutron
+  ignore_errors: true
+  block:
+    - name: Create User
+      command: openstack user create --domain default neutron --password neutron
+
+    - name: Add role for user
+      command: openstack role add --project admin --user neutron admin
+
+    - name: Create service
+      command: openstack service create --name neutron --description "OpenStack Networking" network
+
+    - name: Register public Endpoint
+      command: openstack endpoint create --region RegionOne network public http://localhost:9696
+
+    - name: Register internal Endpoint
+      command: openstack endpoint create --region RegionOne network internal http://localhost:9696
+
+    - name: Register admin Endpoint
+      command: openstack endpoint create --region RegionOne network admin http://localhost:9696
+
+- name: Install Neutron
+  apt:
+    name: 
+      - neutron-server
+      - neutron-plugin-ml2
+      - neutron-linuxbridge-agent
+      - neutron-dhcp-agent
+      - neutron-metadata-agent
+      - neutron-l3-agent
+    update_cache: true
+
+- name: Option 2 - Self-service Networking"
+  block:
+    - name: Copy Neutron config
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/neutron.conf"
+        dest: /etc/neutron/neutron.conf
+        mode: '0640'
+
+    - name: Copy Modular Layer 2 (ML2) plug-in
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/ml2_conf.ini"
+        dest: /etc/neutron/plugins/ml2/ml2_conf.ini
+        mode: '0640'
+
+    - name: Copy linux bridge agent conf
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/linuxbridge_agent.ini"
+        dest: /etc/neutron/plugins/ml2/linuxbridge_agent.ini
+        mode: '0640'
+
+    - name: Copy L3 agent conf
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/l3_agent.ini"
+        dest: /etc/neutron/l3_agent.ini
+        mode: '0640'
+
+    - name: Copy DHCP agent conf
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/dhcp_agent.ini"
+        dest: /etc/neutron/dhcp_agent.ini
+        mode: '0640'
+
+- name: Copy Metadata agent conf
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/metadata_agent.ini"
+    dest: /etc/neutron/metadata_agent.ini
+    mode: '0640'
+
+- name: Enable linux bridge
+  block:
+    - command: sysctl net.bridge.bridge-nf-call-iptables=1
+    - command: sysctl net.bridge.bridge-nf-call-ip6tables=1
+
+- name: Apparmor
+  block:
+    - name: link apparmor
+      command: ln -s /etc/apparmor.d/usr.sbin.dnsmasq /etc/apparmor.d/disable/
+      ignore_errors: true
+
+    - name: restart apparamor
+      command: systemctl restart apparmor
+
+- name: Migrate neutron database
+  command: neutron-db-manage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade head
+
+- name: Restart Neutron 
+  block:
+    - name: Restart nova-api
+      ansible.builtin.systemd:
+        name: nova-api
+        enabled: true
+        state: restarted
+
+    - name: Restart neutron server
+      ansible.builtin.systemd:
+        name: neutron-server
+        enabled: true
+        state: restarted
+
+    - name: Restart neutron linuxbridge
+      ansible.builtin.systemd:
+        name: neutron-linuxbridge-agent
+        enabled: true
+        state: restarted
+
+    - name: Restart neutron dhcp
+      ansible.builtin.systemd:
+        name: neutron-dhcp-agent
+        enabled: true
+        state: restarted
+
+    - name: Restart neutron metadata
+      ansible.builtin.systemd:
+        name: neutron-metadata-agent
+        enabled: true
+        state: restarted
+
+    - name: Restart neutron l3
+      ansible.builtin.systemd:
+        name: neutron-l3-agent
+        enabled: true
+        state: restarted
+
+    - name: Restart nove-compute
+      ansible.builtin.systemd:
+        name: nova-compute
+        enabled: true
+        state: restarted
+
+
+
+- name: Verify
+  block:
+    - name: Get agents
+      command: openstack network agent list
+      register: agents
+
+    - name: Create test network
+      command: openstack network agent list
+
+    - name: Print agents
+      debug: 
+        var: agents.stdout_lines
+
+- name: Simple config
+  block:
+    - name: add network
+      command: | 
+        openstack network create  --share --external \
+        --provider-physical-network provider \
+        --provider-network-type flat provider
+
+    - name: add subnet
+      command: |
+        openstack subnet create --network provider \
+        --allocation-pool start=192.168.30.200,end=192.168.30.240 \
+        --dns-nameserver 192.168.30.1 --gateway 192.168.30.1 \
+        --subnet-range 192.168.30.0/24 provider
+
+        

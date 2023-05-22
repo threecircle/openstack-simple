@@ -1,0 +1,2 @@
+[single-node]
+192.168.88.105 ansible_ssh_user=ubuntu ansible_become_pass=ubuntu

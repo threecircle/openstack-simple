@@ -1,0 +1,17 @@
+---
+- name: Install openstack-dashboard
+  apt:
+    name: openstack-dashboard
+    update_cache: true
+
+- name: Copy Horizon config
+  ansible.builtin.copy:
+    src: "{{ role_path }}/files/local_settings.py"
+    dest: /etc/openstack-dashboard/local_settings.py
+    mode: '0640'
+
+- name: Restart apache2
+  ansible.builtin.systemd:
+    name: apache2
+    enabled: true
+    state: restarted

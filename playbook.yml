@@ -1,0 +1,16 @@
+- hosts: single-node
+  become: true
+
+  vars_files:
+    - env/auth.yml
+  environment: "{{ ost_auth }}"
+
+  roles:
+    - configure_hosts
+    - keystone
+    - glance
+    - placement
+    - nova-controller
+    - nova-compute
+    - neutron-controller
+    - horizon
